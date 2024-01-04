@@ -46,6 +46,19 @@ class Word {
   }
 }
 
+var andWord = Word('AND', -1);
+var orWord = Word('OR', -1);
+var noneWord = Word('-', -1);
+var beWord = Word('BE', -1);
+
+String wordsToString(List<Word> words) {
+  var strings = <String>[];
+  for (var word in words) {
+    strings.add(word.text);
+  }
+  return strings.join(' ');
+}
+
 class Relation {
   dynamic subject; // optional type of [null, List<Words>, Relation]
   dynamic predicate;
@@ -55,13 +68,19 @@ class Relation {
   bool predicateOptional = false;
   bool objectOptional = false;
 
+  List<Word> subjectPronoun = <Word>[];
+  List<Word> predicatePronoun = <Word>[];
+  List<Word> objectPronoun = <Word>[];
+
   Relation({this.subject, this.predicate, this.object});
 
   static dynamic seriesElement(dynamic value) {
     if (value == null) return '';
 
-    if (value is String) {
-      return value;
+    if (value is List<Word>) {
+      return [
+        for (var word in value) {'index': word.index, 'text': word.text}
+      ];
     } else if (value is Relation) {
       return value.toJson();
     }
@@ -69,23 +88,22 @@ class Relation {
 
   Map<String, dynamic> toJson() {
     return {
-      'subject': seriesElement(subject),
-      'predicate': seriesElement(predicate),
-      'object': seriesElement(object),
-      'optional': [subjectOptional, predicateOptional, objectOptional],
+      'subject': {
+        'content': seriesElement(subject),
+        'isOptional': subjectOptional,
+        'pronoun': seriesElement(subjectPronoun),
+      },
+      'predicate': {
+        'content': seriesElement(predicate),
+        'isOptional': predicateOptional,
+        'pronoun': seriesElement(predicatePronoun),
+      },
+      'object': {
+        'content': seriesElement(object),
+        'isOptional': objectOptional,
+        'pronoun': seriesElement(objectPronoun),
+      },
     };
-  }
-
-  void labelSubject(List<Word> words) {
-    subject = words;
-  }
-
-  void labelPredicate(List<Word> words) {
-    predicate = words;
-  }
-
-  void labelObject(List<Word> words) {
-    object = words;
   }
 
   void splitSubject() {
@@ -159,6 +177,7 @@ class LabelState extends ChangeNotifier {
   var structureController = TextEditingController();
 
   var words = <Word>[
+    andWord, orWord, beWord
     // Word('32.7%', 0),
     // Word('of', 1),
     // Word('all', 2),
@@ -226,7 +245,7 @@ class LabelState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleOptional(String relation, Relation parent) {
+  void toggleOptional(List<Word> relation, Relation parent) {
     if (parent.subject == relation) {
       parent.subjectOptional = !parent.subjectOptional;
     } else if (parent.predicate == relation) {
@@ -240,7 +259,7 @@ class LabelState extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool isOptional(String relation, Relation parent) {
+  bool isOptional(List<Word> relation, Relation parent) {
     if (parent.subject == relation) {
       return parent.subjectOptional;
     } else if (parent.predicate == relation) {
@@ -251,26 +270,35 @@ class LabelState extends ChangeNotifier {
     return false;
   }
 
-  String selectedWordsToString() {
-    var strings = <String>[];
-    selectedWords.sort((w1, w2) => w1.index.compareTo(w2.index));
-    for (var word in selectedWords) {
-      strings.add(word.text);
+  void labelPronoun(List<Word> relation, Relation parent) {
+    if (parent.subject == relation) {
+      parent.subjectPronoun = sortSelectedWords().toList();
+    } else if (parent.predicate == relation) {
+      parent.predicatePronoun = sortSelectedWords().toList();
+    } else if (parent.object == relation) {
+      parent.objectPronoun = sortSelectedWords().toList();
     }
-    return strings.join(' ');
+
+    selectedWords.clear();
+    notifyListeners();
+  }
+
+  List<Word> sortSelectedWords() {
+    selectedWords.sort((w1, w2) => w1.index.compareTo(w2.index));
+    return selectedWords;
   }
 
   void label(Relation relation, position) {
     if (selectedWords.isEmpty) {
       return;
     }
-    var text = selectedWordsToString();
+    var sWords = sortSelectedWords().toList();
     if (position == 'subject') {
-      relation.subject = text;
+      relation.subject = sWords;
     } else if (position == 'predicate') {
-      relation.predicate = text;
+      relation.predicate = sWords;
     } else if (position == 'object') {
-      relation.object = text;
+      relation.object = sWords;
     }
     selectedWords.clear();
     notifyListeners();
@@ -280,18 +308,30 @@ class LabelState extends ChangeNotifier {
     if (position is String) {
       if (position == 'subject') {
         relation.subject = null;
+        relation.subjectOptional = false;
+        relation.subjectPronoun = [];
       } else if (position == 'predicate') {
         relation.predicate = null;
+        relation.predicateOptional = false;
+        relation.predicatePronoun = [];
       } else if (position == 'object') {
         relation.object = null;
+        relation.objectOptional = false;
+        relation.objectPronoun = [];
       }
     } else if (position is Relation) {
       if (position.subject == relation) {
         position.subject = null;
+        relation.subjectOptional = false;
+        relation.subjectPronoun = [];
       } else if (position.predicate == relation) {
         position.predicate = null;
+        relation.predicateOptional = false;
+        relation.predicatePronoun = [];
       } else if (position.object == relation) {
         position.object = null;
+        relation.objectOptional = false;
+        relation.objectPronoun = [];
       }
     }
 
@@ -343,11 +383,10 @@ class LabelState extends ChangeNotifier {
 
   void getNext() {
     if (structureController.text.isNotEmpty) {
-      save();
+      save(sentence, currentIndex, structureController.text, relations);
     }
 
-    currentIndex += 1;
-    jumpTo(currentIndex);
+    jumpTo(currentIndex + 1);
   }
 
   void jumpTo(int destIndex) {
@@ -356,6 +395,8 @@ class LabelState extends ChangeNotifier {
       return;
     }
     sentence = sentences[destIndex];
+    sentence = '${sentence[0].toLowerCase()}${sentence.substring(1)}';
+    sentence[0].toLowerCase();
     sentenceController.text = sentence;
     structureController.text = '';
     currentIndex = destIndex;
@@ -366,7 +407,7 @@ class LabelState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void tokenize() async {
+  void tokenize() {
     words.clear();
     sentenceController.text
         .split(' ')
@@ -374,6 +415,8 @@ class LabelState extends ChangeNotifier {
         .forEach((int index, String word) {
       words.add(Word(word, index));
     });
+
+    words.addAll([andWord, orWord, beWord]);
 
     // var url =
     //     Uri.http('127.0.0.1:5000', '/', {'sentence': sentenceController.text});
@@ -428,7 +471,8 @@ class LabelState extends ChangeNotifier {
     return result;
   }
 
-  Future<void> save() async {
+  Future<void> save(String inputSentence, int destIndex, String structureText,
+      List<Relation> labeledRelations) async {
     if (saveDirectory == '') {
       var result = await FilePicker.platform.getDirectoryPath();
       if (result == null) {
@@ -438,7 +482,7 @@ class LabelState extends ChangeNotifier {
     }
 
     var structure = <dynamic>[];
-    structureController.text
+    structureText
         .toUpperCase()
         .split('-')
         .toList()
@@ -446,17 +490,17 @@ class LabelState extends ChangeNotifier {
         .forEach((index, clause) => structure.add(parseStructure(clause)));
 
     var relationsJson = <dynamic>[];
-    relations
+    labeledRelations
         .asMap()
         .forEach((index, relation) => relationsJson.add(relation.toJson()));
 
     var data = {
-      'sentence': sentence,
+      'sentence': inputSentence,
       'structure': structure,
       'relations': relationsJson,
     };
 
-    final destFile = File('$saveDirectory\\${currentIndex + 1}.json');
+    final destFile = File('$saveDirectory\\${destIndex + 1}.json');
     destFile.writeAsString(JsonEncoder.withIndent('  ').convert(data));
   }
 }
@@ -467,9 +511,9 @@ class MyHomePage extends StatelessWidget {
     var labelState = context.watch<LabelState>();
 
     // The words that can be selected as label
-    var filterchips = <FilterChip>[];
+    var filterChips = <FilterChip>[];
     for (var i = 0; i < labelState.words.length; i++) {
-      filterchips.add(FilterChip(
+      filterChips.add(FilterChip(
           label: Text(labelState.words[i].text),
           selected: labelState.selectedWords.contains(labelState.words[i]),
           onSelected: (value) {
@@ -480,6 +524,9 @@ class MyHomePage extends StatelessWidget {
             }
           }));
     }
+
+    var functionalFilterChips = filterChips.sublist(filterChips.length - 3);
+    filterChips.removeRange(filterChips.length - 3, filterChips.length);
 
     // The relations showing
     var relationElements = <RelationWidget>[];
@@ -520,7 +567,12 @@ class MyHomePage extends StatelessWidget {
             ),
             Padding(padding: const EdgeInsets.all(5)),
             Divider(height: 3.0, color: Colors.grey),
-            Wrap(spacing: 3, runSpacing: 6, children: filterchips),
+            Padding(padding: const EdgeInsets.all(5)),
+            Wrap(spacing: 3, runSpacing: 6, children: filterChips),
+            Padding(padding: const EdgeInsets.all(5)),
+            Divider(height: 3.0, color: Colors.grey),
+            Padding(padding: const EdgeInsets.all(5)),
+            Wrap(spacing: 3, runSpacing: 6, children: functionalFilterChips),
             Padding(padding: const EdgeInsets.all(5)),
             Divider(height: 3.0, color: Colors.grey),
             TextField(
@@ -656,27 +708,63 @@ class RelationWidget extends StatelessWidget {
       color = Colors.blue;
     }
 
-    if (element is String) {
+    if (element is List<Word>) {
+      var children = [
+        IconButton(
+          onPressed: () => {labelState.split(parent, position)},
+          icon: Icon(Icons.splitscreen),
+          color: color,
+          tooltip: 'split',
+        ),
+        IconButton(
+            onPressed: () => {labelState.delete(parent, position)},
+            icon: Icon(Icons.delete),
+            color: color),
+        // optional toggle button
+        ToggleButtons(
+          onPressed: (index) => {labelState.toggleOptional(element, parent)},
+          isSelected: [labelState.isOptional(element, parent)],
+          children: [Icon(Icons.rule)],
+        ),
+      ];
+
+      if (position == 'subject' && parent.subjectPronoun.isNotEmpty) {
+        children.add(
+          Text(
+            wordsToString(parent.subjectPronoun),
+            style: TextStyle(color: color, fontSize: 15),
+          ),
+        );
+      } else if (position == 'predicate' &&
+          parent.predicatePronoun.isNotEmpty) {
+        children.add(
+          Text(
+            wordsToString(parent.predicatePronoun),
+            style: TextStyle(color: color, fontSize: 15),
+          ),
+        );
+      } else if (position == 'object' && parent.objectPronoun.isNotEmpty) {
+        children.add(
+          Text(
+            wordsToString(parent.objectPronoun),
+            style: TextStyle(color: color, fontSize: 15),
+          ),
+        );
+      } else {
+        children.add(IconButton(
+          onPressed: () => {labelState.labelPronoun(element, parent)},
+          icon: Icon(Icons.people_alt),
+          color: color,
+          tooltip: 'pronoun resolution',
+        ));
+      }
+
       return Column(mainAxisSize: MainAxisSize.min, children: [
         Text(
-          element,
+          wordsToString(element),
           style: TextStyle(color: color, fontSize: 20),
         ),
-        Row(mainAxisSize: MainAxisSize.min, children: [
-          IconButton(
-              onPressed: () => {labelState.split(parent, position)},
-              icon: Icon(Icons.splitscreen),
-              color: color),
-          IconButton(
-              onPressed: () => {labelState.delete(parent, position)},
-              icon: Icon(Icons.delete),
-              color: color),
-          ToggleButtons(
-              onPressed: (index) =>
-                  {labelState.toggleOptional(element, parent)},
-              isSelected: [labelState.isOptional(element, parent)],
-              children: [Icon(Icons.bolt)]),
-        ]),
+        Row(mainAxisSize: MainAxisSize.min, children: children),
       ]);
     } else if (element is Relation) {
       return RelationWidget(relation: element, parent: parent);
@@ -694,7 +782,7 @@ class RelationWidget extends StatelessWidget {
       ]);
     }
 
-    throw UnimplementedError("unknoown elemnt $element");
+    throw UnimplementedError('unknoown elemnt $element');
   }
 
   @override

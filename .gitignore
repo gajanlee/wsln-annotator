@@ -70,3 +70,5 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 /windows/
+/data/dev
+/data/test
