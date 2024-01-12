@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
-// import 'package:http/http.dart' as http;
 import 'dart:io';
 import 'dart:convert';
 import 'package:tuple/tuple.dart';
+import 'translator.dart';
+import 'package:global_configuration/global_configuration.dart';
 
 void main() {
   runApp(MyApp());
+  GlobalConfiguration().loadFromAsset('baidufanyi_key.json');
 }
 
 class MyApp extends StatelessWidget {
@@ -50,6 +52,9 @@ var andWord = Word('AND', -1);
 var orWord = Word('OR', -1);
 var noneWord = Word('-', -1);
 var beWord = Word('BE', -1);
+var constrainWord = Word('CONSTRAIN', -1);
+
+var predicates = <Word>[andWord, orWord, beWord, constrainWord];
 
 String wordsToString(List<Word> words) {
   var strings = <String>[];
@@ -176,32 +181,13 @@ class LabelState extends ChangeNotifier {
 
   var structureController = TextEditingController();
 
-  var words = <Word>[
-    andWord, orWord, beWord
-    // Word('32.7%', 0),
-    // Word('of', 1),
-    // Word('all', 2),
-    // Word('households', 3),
-    // Word('were', 4),
-    // Word('made', 5),
-    // Word('up', 6),
-    // Word('of', 22),
-    // Word('individuals', 7),
-    // Word('and', 8),
-    // Word('15.7%', 9),
-    // Word('had', 10),
-    // Word('someone', 11),
-    // Word('living', 12),
-    // Word('alone', 13),
-    // Word('who', 14),
-    // Word('was', 15),
-    // Word('65', 16),
-    // Word('years', 17),
-    // Word('of', 18),
-    // Word('age', 19),
-    // Word('or', 20),
-    // Word('older', 21),
-  ];
+  var words = [...predicates];
+
+  // BaiduFanyi Translator
+  String appid = '';
+  String secret = '';
+  String salt = 'wsln_openie';
+  String translatedSentence = '翻译文本';
 
   var selectedWords = <Word>[];
 
@@ -381,9 +367,37 @@ class LabelState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void getNext() {
+  Future<void> showErrorDialog(BuildContext context, String message) {
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Error: Save Failed'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              style: TextButton.styleFrom(
+                textStyle: Theme.of(context).textTheme.labelLarge,
+              ),
+              child: Text('Close'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void getNext(BuildContext context) async {
     if (structureController.text.isNotEmpty) {
-      save(sentence, currentIndex, structureController.text, relations);
+      try {
+        await save(sentence, currentIndex, structureController.text, relations);
+      } catch (e) {
+        showErrorDialog(context, e.toString());
+        return;
+      }
     }
 
     jumpTo(currentIndex + 1);
@@ -395,35 +409,34 @@ class LabelState extends ChangeNotifier {
       return;
     }
     sentence = sentences[destIndex];
-    sentence = '${sentence[0].toLowerCase()}${sentence.substring(1)}';
-    sentence[0].toLowerCase();
     sentenceController.text = sentence;
     structureController.text = '';
     currentIndex = destIndex;
-    tokenize();
+    tokenize('${sentence[0].toLowerCase()}${sentence.substring(1)}');
     reset();
     indexController.text = (destIndex + 1).toString();
+
+    // translate the sentence
+    translate(
+            sentence,
+            GlobalConfiguration().getValue('appid'),
+            GlobalConfiguration().getValue('secret'),
+            GlobalConfiguration().getValue('salt'))
+        .then(((value) {
+      translatedSentence = value;
+      notifyListeners();
+    }));
 
     notifyListeners();
   }
 
-  void tokenize() {
+  void tokenize(String sentence) {
     words.clear();
-    sentenceController.text
-        .split(' ')
-        .asMap()
-        .forEach((int index, String word) {
+    sentence.split(' ').asMap().forEach((int index, String word) {
       words.add(Word(word, index));
     });
 
-    words.addAll([andWord, orWord, beWord]);
-
-    // var url =
-    //     Uri.http('127.0.0.1:5000', '/', {'sentence': sentenceController.text});
-    // var data = await http.get(url);
-    // jsonDecode(data.body)['words'].asMap().forEach((int index, dynamic word) {
-    //   words.add(Word(word as String, index));
-    // });
+    words.addAll(predicates);
 
     notifyListeners();
   }
@@ -446,7 +459,7 @@ class LabelState extends ChangeNotifier {
 
   Tuple2<Map<String, dynamic>, int> parseClauseStructure(String text) {
     var result = <String, dynamic>{};
-    var offset = text.lastIndexOf('}');
+    var offset = text.indexOf('}');
     // skip `{`
     result['clauseType'] = getElementName(text[1]);
     result['clauseStructure'] = parseStructure(text.substring(3, offset));
@@ -525,8 +538,10 @@ class MyHomePage extends StatelessWidget {
           }));
     }
 
-    var functionalFilterChips = filterChips.sublist(filterChips.length - 3);
-    filterChips.removeRange(filterChips.length - 3, filterChips.length);
+    var functionalFilterChips =
+        filterChips.sublist(filterChips.length - predicates.length);
+    filterChips.removeRange(
+        filterChips.length - predicates.length, filterChips.length);
 
     // The relations showing
     var relationElements = <RelationWidget>[];
@@ -547,7 +562,7 @@ class MyHomePage extends StatelessWidget {
               children: [
                 IconButton(
                     onPressed: () {
-                      labelState.tokenize();
+                      labelState.tokenize(labelState.sentenceController.text);
                     },
                     tooltip: 'Re-tokenize',
                     icon: Icon(Icons.refresh)),
@@ -569,6 +584,10 @@ class MyHomePage extends StatelessWidget {
             Divider(height: 3.0, color: Colors.grey),
             Padding(padding: const EdgeInsets.all(5)),
             Wrap(spacing: 3, runSpacing: 6, children: filterChips),
+            Padding(padding: const EdgeInsets.all(5)),
+            Divider(height: 3.0, color: Colors.grey),
+            Padding(padding: const EdgeInsets.all(5)),
+            Text(labelState.translatedSentence, style: TextStyle(fontSize: 15)),
             Padding(padding: const EdgeInsets.all(5)),
             Divider(height: 3.0, color: Colors.grey),
             Padding(padding: const EdgeInsets.all(5)),
@@ -675,7 +694,7 @@ class MyHomePage extends StatelessWidget {
                 child: Icon(Icons.refresh),
               ),
               FloatingActionButton(
-                onPressed: labelState.getNext,
+                onPressed: () => labelState.getNext(context),
                 tooltip: 'Next',
                 child: Icon(Icons.arrow_right_alt),
               ),
