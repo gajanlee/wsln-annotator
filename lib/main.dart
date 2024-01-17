@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -633,6 +635,7 @@ class MyHomePage extends StatelessWidget {
                   Wrap(
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
+                        TimerWidget(),
                         Text(labelState.filename),
                         // IntrinsicWidth(
                         SizedBox(
@@ -654,7 +657,6 @@ class MyHomePage extends StatelessWidget {
                             },
                           ),
                         ),
-
                         Text('/'
                             '${labelState.sentences.isEmpty ? '-' : labelState.sentences.length} '),
                         // ]),
@@ -701,6 +703,51 @@ class MyHomePage extends StatelessWidget {
             ],
           ),
         ));
+  }
+}
+
+class TimerWidget extends StatefulWidget {
+  const TimerWidget({
+    super.key,
+  });
+
+  @override
+  State<TimerWidget> createState() => _TimerWidgetState();
+}
+
+class _TimerWidgetState extends State<TimerWidget> {
+  late Timer timer;
+  int seconds = 0;
+  bool timerStart = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      children: [
+        Text(
+            '${(seconds ~/ 3600).toString().padLeft(2, '0')} : ${((seconds % 3600) ~/ 60).toString().padLeft(2, '0')} : ${(seconds % 60).toString().padLeft(2, '0')}'),
+        IconButton(
+            onPressed: toggleTimer,
+            icon: timerStart ? Icon(Icons.pause) : Icon(Icons.play_circle))
+      ],
+    );
+  }
+
+  void toggleTimer() {
+    if (!timerStart) {
+      timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        setState(() {
+          seconds++;
+        });
+      });
+    } else {
+      timer.cancel();
+    }
+
+    setState(() {
+      timerStart = !timerStart;
+    });
   }
 }
 
