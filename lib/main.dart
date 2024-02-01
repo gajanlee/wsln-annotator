@@ -40,7 +40,8 @@ class Word {
 
   Word(this.text, this.index) {
     if (text.isEmpty) {
-      throw ArgumentError();
+      // throw ArgumentError();
+      ;
     }
   }
 
@@ -362,7 +363,8 @@ class LabelState extends ChangeNotifier {
       filename = 'test';
     } else {
       // TODO: benchie
-      throw Exception('invalid input file ${file.path}');
+      filename = file.path;
+      // throw Exception('invalid input file ${file.path}');
     }
 
     jumpTo(0);
